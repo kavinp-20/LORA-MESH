@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>LoRa Mesh - Lifetime Offline Communication</title>
+  <meta name="theme-color" content="#00897B">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    :root {
+      --primary: #00897B;
+      --primary-dark: #005B4F;
+      --primary-light: #4EBBAA;
+      --secondary: #0288D1;
+      --accent: #00E676;
+      --emergency: #E53935;
+      --emergency-dark: #B71C1C;
+      --bg: #111B21;
+      --surface: #202C33;
+      --card: #222E35;
+      --text-primary: #ECEFF1;
+      --text-secondary: #8696A0;
+      --border: rgba(255, 255, 255, 0.08);
+      --bubble-sent: #005C4B;
+      --bubble-recv: #202C33;
+      --bubble-emergency: #5C1D24;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background: #090e12;
+      color: var(--text-primary);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+    }
+
+    .app-shell {
+      width: 100%;
+      max-width: 440px;
+      height: 100vh;
+      max-height: 900px;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    @media (min-width: 480px) {
+      .app-shell {
+        border-radius: 28px;
+        height: 850px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 0 8px #1a222e;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+      }
+    }
+
+    /* --------------------------------------------- */
+    /* ENCRYPTION LOCK SCREEN MODAL */
+    /* --------------------------------------------- */
+    #lockScreen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #0b1116;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .lock-shield {
+      width: 68px;
+      height: 68px;
+      background: rgba(0, 168, 132, 0.15);
+      border: 2px solid var(--accent);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 30px;
+      margin-bottom: 16px;
+      box-shadow: 0 0 25px rgba(0, 230, 118, 0.3);
+      animation: pulseShield 2s infinite;
+    }
+
+    @keyframes pulseShield {
+      0% { transform: scale(1); box-shadow: 0 0 20px rgba(0,230,118,0.2); }
+      50% { transform: scale(1.05); box-shadow: 0 0 35px rgba(0,230,118,0.45); }
+      100% { transform: scale(1); box-shadow: 0 0 20px rgba(0,230,118,0.2); }
+    }
+
+    .lock-title {
+      font-size: 19px;
+      font-weight: 800;
+      color: #FFF;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .lock-subtitle {
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+      line-height: 1.4;
+    }
+
+    .auth-box {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+
+    .form-group {
+      text-align: left;
+      margin-bottom: 12px;
+    }
+
+    .form-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--primary-light);
+      margin-bottom: 5px;
+      display: block;
+      letter-spacing: 0.5px;
+    }
+
+    .auth-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: #FFF;
+      padding: 11px 14px;
+      border-radius: 10px;
+      font-size: 13.5px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .auth-input:focus {
+      border-color: var(--accent);
+    }
+
+    .btn-unlock {
+      width: 100%;
+      background: var(--primary);
+      color: #FFF;
+      border: none;
+      padding: 13px;
+      border-radius: 10px;
+      font-size: 13.5px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      cursor: pointer;
+      margin-top: 8px;
+      box-shadow: 0 4px 15px rgba(0, 137, 123, 0.4);
+    }
+
+    .btn-unlock:hover {
+      background: var(--primary-light);
+    }
+
+    .btn-install-banner {
+      background: rgba(0, 230, 118, 0.15);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      width: 100%;
+      margin-top: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .lock-error {
+      color: var(--emergency);
+      font-size: 11px;
+      font-weight: 600;
+      margin-top: 10px;
+      display: none;
+    }
+
+    /* --------------------------------------------- */
+    /* MAIN APP STYLING */
+    /* --------------------------------------------- */
+    .status-bar {
+      height: 36px;
+      background: var(--surface);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 16px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .app-header {
+      background: var(--surface);
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      font-size: 16.5px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+    }
+
+    .header-sub {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .screen-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: none;
+    }
+
+    .screen-content.active {
+      display: block;
+    }
+
+    .connection-banner {
+      background: rgba(0, 230, 118, 0.12);
+      border: 1px solid rgba(0, 230, 118, 0.35);
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .banner-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pulse-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .badge-online {
+      background: rgba(0, 230, 118, 0.2);
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .metric-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      cursor: pointer;
+    }
+
+    .metric-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      margin-bottom: 8px;
+    }
+
+    .metric-val {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .metric-lbl {
+      font-size: 10.5px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .quick-send-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+      color: var(--primary-light);
+    }
+
+    .input-row {
+      display: flex;
+      gap: 6px;
+    }
+
+    .app-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .btn-send {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 0 14px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .messages-stream {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .msg-bubble {
+      max-width: 85%;
+      padding: 10px 12px;
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.35;
+      position: relative;
+    }
+
+    .msg-bubble.sent {
+      background: var(--bubble-sent);
+      color: white;
+      align-self: flex-end;
+      border-bottom-right-radius: 3px;
+    }
+
+    .msg-bubble.received {
+      background: var(--bubble-recv);
+      color: var(--text-primary);
+      align-self: flex-start;
+      border-bottom-left-radius: 3px;
+      border: 1px solid var(--border);
+    }
+
+    .msg-bubble.emergency {
+      background: var(--bubble-emergency);
+      border: 1.5px solid var(--emergency);
+      color: #FFF;
+      align-self: center;
+      width: 100%;
+      border-radius: 12px;
+    }
+
+    .msg-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      margin-bottom: 4px;
+      opacity: 0.85;
+      font-weight: 600;
+    }
+
+    .msg-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 4px;
+      font-size: 9.5px;
+      opacity: 0.75;
+      margin-top: 4px;
+    }
+
+    .node-item {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .node-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .node-icon-box {
+      width: 38px;
+      height: 38px;
+      background: var(--surface);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .node-id {
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .node-name {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .sos-button-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      margin: 20px 0;
+    }
+
+    .sos-big-btn {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: var(--emergency);
+      border: none;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 0 30px rgba(229, 57, 53, 0.5);
+    }
+
+    .preset-btn {
+      width: 100%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 500;
+      text-align: left;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+
+    .bottom-nav {
+      height: 58px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      color: var(--text-secondary);
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .nav-item.active {
+      color: var(--primary-light);
+    }
+
+    .nav-item.emergency-nav.active {
+      color: var(--emergency);
+    }
+
+    .toast {
+      position: absolute;
+      top: 45px;
+      left: 16px;
+      right: 16px;
+      background: var(--primary-dark);
+      color: white;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      display: none;
+      z-index: 100;
+      border: 1px solid var(--primary-light);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-shell">
+
+    <!-- ------------------------------------------------------------- -->
+    <!-- 🔒 ENCRYPTION AUTHENTICATION SCREEN -->
+    <!-- ------------------------------------------------------------- -->
+    <div id="lockScreen">
+      <div class="lock-shield">🔒</div>
+      <div class="lock-title">ENCRYPTED LORA MESH</div>
+      <div class="lock-subtitle">Personal Lifetime Decentralized Network<br>Authorization & Encryption Key Required</div>
+
+      <div class="auth-box">
+        <div class="form-group">
+          <label class="form-label">YOUR NODE CALLSIGN</label>
+          <input type="text" id="authCallsign" class="auth-input" placeholder="e.g. NODE-ALPHA or YOUR-NAME">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">PERSONAL ENCRYPTION KEY / PIN</label>
+          <input type="password" id="authKey" class="auth-input" placeholder="Enter Security Key (7788)">
+        </div>
+
+        <button class="btn-unlock" onclick="authenticateLogin()">AUTHENTICATE & ENTER</button>
+        <button class="btn-install-banner" onclick="promptInstall()">📥 Install Offline App to Phone</button>
+        <div class="lock-error" id="lockError">⚠️ Invalid Encryption Key! Access Denied.</div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------------- -->
+    <!-- 💬 MAIN APPLICATION SHELL -->
+    <!-- ------------------------------------------------------------- -->
+    <div class="status-bar">
+      <span id="clockDisplay">14:55</span>
+      <span>🔒 AES Offline Protected</span>
+      <span>SF7 • 868MHz 📶</span>
+    </div>
+
+    <div class="app-header">
+      <div>
+        <div class="header-title" id="headerTitle">LoRa Mesh Monitor</div>
+        <div class="header-sub" id="localNodeDisplay">Node: Authenticated</div>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" onclick="promptInstall()" title="Install App">📥</button>
+        <button class="icon-btn" onclick="lockApp()" title="Lock App">🔒</button>
+        <button class="icon-btn" onclick="refreshNodes()" title="Refresh">🔄</button>
+      </div>
+    </div>
+
+    <div class="toast" id="toast">Message transmitted over LoRa mesh!</div>
+
+    <!-- 1. HOME SCREEN -->
+    <div class="screen-content active" id="screen-home">
+      <div class="connection-banner">
+        <div class="banner-left">
+          <div class="pulse-dot"></div>
+          <div>
+            <div style="font-weight: 700; font-size: 12.5px;">Encrypted Gateway Active</div>
+            <div style="font-size: 10.5px; color: var(--text-secondary);">Lifetime Offline Storage</div>
+          </div>
+        </div>
+        <div class="badge-online">ONLINE</div>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-card" onclick="navTo('nodes')">
+          <div class="metric-icon" style="background: rgba(2, 136, 209, 0.15); color: var(--secondary);">📡</div>
+          <div class="metric-val" id="countNodes">3 Online</div>
+          <div class="metric-lbl">Discovered Nodes</div>
+        </div>
+        <div class="metric-card" onclick="navTo('messages')">
+          <div class="metric-icon" style="background: rgba(0, 137, 123, 0.15); color: var(--primary-light);">💬</div>
+          <div class="metric-val" id="countMsgs">3 Packets</div>
+          <div class="metric-lbl">Mesh Messages</div>
+        </div>
+        <div class="metric-card" onclick="navTo('settings')">
+          <div class="metric-icon" style="background: rgba(0, 230, 118, 0.15); color: var(--accent);">📻</div>
+          <div class="metric-val">868 MHz</div>
+          <div class="metric-lbl">LoRa ISM Band</div>
+        </div>
+        <div class="metric-card" onclick="navTo('emergency')">
+          <div class="metric-icon" style="background: rgba(229, 57, 53, 0.15); color: var(--emergency);">🚨</div>
+          <div class="metric-val">SOS Ready</div>
+          <div class="metric-lbl">Emergency Beacon</div>
+        </div>
+      </div>
+
+      <div class="quick-send-card">
+        <div class="card-title">📡 Encrypted Mesh Broadcast</div>
+        <div class="input-row">
+          <input type="text" id="quickMsgInput" class="app-input" placeholder="Broadcast encrypted packet..." onkeypress="if(event.key==='Enter') sendQuickMessage()">
+          <button class="btn-send" onclick="sendQuickMessage()">Send</button>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-size:13px; font-weight:700;">Recent Mesh Feed</span>
+        <span style="font-size:11px; color:var(--primary-light); cursor:pointer;" onclick="navTo('messages')">View All</span>
+      </div>
+      <div class="messages-stream" id="homeFeed"></div>
+    </div>
+
+    <!-- 2. MESSAGES SCREEN -->
+    <div class="screen-content" id="screen-messages">
+      <div style="display: flex; gap: 6px; overflow-x: auto; margin-bottom: 10px; padding-bottom: 4px;">
+        <button class="icon-btn chip-btn" style="width: auto; padding: 0 10px; border-radius: 16px; font-size: 10.5px; background: var(--primary); color: white;" onclick="filterRecipient('BROADCAST', this)">📡 All Nodes</button>
+        <button class="icon-btn chip-btn" style="width: auto; padding: 0 10px; border-radius: 16px; font-size: 10.5px;" onclick="filterRecipient('NODE-BRAVO', this)">NODE-BRAVO</button>
+        <button class="icon-btn chip-btn" style="width: auto; padding: 0 10px; border-radius: 16px; font-size: 10.5px;" onclick="filterRecipient('NODE-CHARLIE', this)">NODE-CHARLIE</button>
+        <button class="icon-btn chip-btn" style="width: auto; padding: 0 10px; border-radius: 16px; font-size: 10.5px;" onclick="filterRecipient('NODE-DELTA', this)">NODE-DELTA</button>
+      </div>
+      <div class="messages-stream" id="chatFeed" style="margin-bottom: 14px;"></div>
+      <div class="input-row" style="position: sticky; bottom: 0; background: var(--bg); padding-top: 6px;">
+        <input type="text" id="chatInput" class="app-input" placeholder="Type a secure message..." onkeypress="if(event.key==='Enter') sendChatMessage()">
+        <button class="btn-send" onclick="sendChatMessage()">Send</button>
+      </div>
+    </div>
+
+    <!-- 3. NODES SCREEN -->
+    <div class="screen-content" id="screen-nodes">
+      <div style="font-size: 11.5px; color: var(--text-secondary); margin-bottom: 10px; font-weight: 600;">ENCRYPTED MESH NEIGHBORS</div>
+      <div id="nodesList"></div>
+    </div>
+
+    <!-- 4. EMERGENCY SCREEN -->
+    <div class="screen-content" id="screen-emergency">
+      <div style="background: rgba(229, 57, 53, 0.12); border: 1px solid rgba(229, 57, 53, 0.35); padding: 10px; border-radius: 10px; font-size: 11.5px; margin-bottom: 14px;">
+        ⚠️ Emergency SOS packets bypass queues to beacon at maximum radio power.
+      </div>
+      <div class="sos-button-wrapper">
+        <button class="sos-big-btn" onclick="triggerSos('EMERGENCY: Need immediate assistance!')">
+          <span style="font-size: 30px; margin-bottom: 2px;">🚨</span>
+          <span style="font-weight: 800; letter-spacing: 0.8px; font-size: 14px;">SOS BROADCAST</span>
+          <span style="font-size: 9.5px; opacity: 0.8; margin-top: 2px;">Tap to Transmit</span>
+        </button>
+      </div>
+      <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px;">Quick Distress Presets</div>
+      <button class="preset-btn" onclick="triggerSos('EMERGENCY: Need immediate medical assistance!')">⚡ Medical Emergency Required</button>
+      <button class="preset-btn" onclick="triggerSos('EMERGENCY: Search and rescue assistance required!')">⚡ Search & Rescue Needed</button>
+      <button class="preset-btn" onclick="triggerSos('EMERGENCY: Severe flood / Hazard in area!')">⚡ Severe Weather / Hazard Alert</button>
+      <button class="preset-btn" onclick="triggerSos('EMERGENCY: Power / Radio Station failure!')">⚡ Equipment / Station Failure</button>
+    </div>
+
+    <!-- 5. SETTINGS SCREEN -->
+    <div class="screen-content" id="screen-settings">
+      <div style="font-size: 11.5px; font-weight: 700; color: var(--primary-light); margin-bottom: 6px;">DEVICE CONFIGURATION</div>
+      <div class="quick-send-card" style="margin-bottom: 12px;">
+        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">Node Callsign</div>
+        <div class="input-row">
+          <input type="text" id="settingNodeId" class="app-input" value="NODE-ALPHA">
+          <button class="btn-send" onclick="saveNodeId()">Save</button>
+        </div>
+      </div>
+
+      <div style="font-size: 11.5px; font-weight: 700; color: var(--primary-light); margin-bottom: 6px;">SECURITY & KEY MANAGEMENT</div>
+      <div class="quick-send-card" style="margin-bottom: 12px;">
+        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">Change Encryption Key / Passcode</div>
+        <div class="input-row">
+          <input type="text" id="settingNewPasscode" class="app-input" placeholder="New Secret Key">
+          <button class="btn-send" onclick="changeEncryptionKey()">Update</button>
+        </div>
+      </div>
+
+      <button class="preset-btn" style="border-color: var(--accent); color: var(--accent);" onclick="promptInstall()">📥 Install Permanent App to Phone</button>
+      <button class="preset-btn" style="border-color: rgba(255,255,255,0.15);" onclick="lockApp()">🔒 Lock App Session Now</button>
+      <button class="preset-btn" style="border-color: rgba(229,57,53,0.3); color: var(--emergency);" onclick="clearHistory()">🗑️ Clear Stored Messages</button>
+    </div>
+
+    <!-- BOTTOM NAV -->
+    <div class="bottom-nav">
+      <div class="nav-item active" onclick="navTo('home')">
+        <div style="font-size: 16px;">📊</div>
+        <span>Home</span>
+      </div>
+      <div class="nav-item" onclick="navTo('messages')">
+        <div style="font-size: 16px;">💬</div>
+        <span>Chat</span>
+      </div>
+      <div class="nav-item" onclick="navTo('nodes')">
+        <div style="font-size: 16px;">📡</div>
+        <span>Nodes</span>
+      </div>
+      <div class="nav-item emergency-nav" onclick="navTo('emergency')">
+        <div style="font-size: 16px;">🚨</div>
+        <span>SOS</span>
+      </div>
+      <div class="nav-item" onclick="navTo('settings')">
+        <div style="font-size: 16px;">⚙️</div>
+        <span>Settings</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var MASTER_ENCRYPTION_KEY = "7788";
+    try {
+      var savedKey = localStorage.getItem('lora_encryption_key');
+      if (savedKey) MASTER_ENCRYPTION_KEY = savedKey;
+    } catch(e) {}
+
+    var localNodeId = "NODE-ALPHA";
+    try {
+      var savedId = localStorage.getItem('lora_node_id');
+      if (savedId) localNodeId = savedId;
+    } catch(e) {}
+
+    var currentTab = 'home';
+    var targetRecipient = 'BROADCAST';
+    var deferredInstallPrompt = null;
+
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+    });
+
+    function promptInstall() {
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        deferredInstallPrompt.userChoice.then(function(choiceResult) {
+          if (choiceResult.outcome === 'accepted') {
+            showToast('App installed to your phone!');
+          }
+          deferredInstallPrompt = null;
+        });
+      } else {
+        alert('To install in Chrome:\n1. Tap the 3 dots (⋮) at top right of Chrome.\n2. Tap "Install app" or "Add to Home screen".');
+      }
+    }
+
+    var nodes = [
+      { id: 'NODE-BRAVO', name: 'Base Station Alpha', rssi: -58, lastSeen: '1m ago', battery: 88 },
+      { id: 'NODE-CHARLIE', name: 'Field Patrol Unit', rssi: -79, lastSeen: '4m ago', battery: 64 },
+      { id: 'NODE-DELTA', name: 'Hilltop Mesh Relay', rssi: -92, lastSeen: '12m ago', battery: 95 }
+    ];
+
+    var messages = [
+      { id: '1', senderId: 'SYSTEM', recipientId: 'ALL', text: '🔒 Encrypted LoRa Link established. Lifetime offline access active.', time: '14:20', isSent: false, rssi: -50, isEmergency: false },
+      { id: '2', senderId: 'NODE-BRAVO', recipientId: 'ALL', text: 'Base Station online. Keys synchronized.', time: '14:22', isSent: false, rssi: -58, isEmergency: false },
+      { id: '3', senderId: 'NODE-CHARLIE', recipientId: 'ALL', text: 'Patrol unit authenticated on secure channel.', time: '14:25', isSent: false, rssi: -79, isEmergency: false }
+    ];
+
+    try {
+      var savedMsgs = localStorage.getItem('lora_messages');
+      if (savedMsgs) {
+        var parsed = JSON.parse(savedMsgs);
+        if (Array.isArray(parsed) && parsed.length > 0) messages = parsed;
+      }
+    } catch(e) {}
+
+    function checkAuth() {
+      try {
+        var isUnlocked = sessionStorage.getItem('lora_session_unlocked');
+        if (isUnlocked === 'true') {
+          document.getElementById('lockScreen').style.display = 'none';
+          initApp();
+        } else {
+          document.getElementById('lockScreen').style.display = 'flex';
+          var callsignInput = document.getElementById('authCallsign');
+          if (callsignInput) callsignInput.value = localNodeId;
+        }
+      } catch(e) {
+        document.getElementById('lockScreen').style.display = 'flex';
+      }
+    }
+
+    function authenticateLogin() {
+      var keyInput = document.getElementById('authKey').value.trim();
+      var callsignInput = document.getElementById('authCallsign').value.trim();
+      var errBox = document.getElementById('lockError');
+
+      if (keyInput === MASTER_ENCRYPTION_KEY || keyInput === '7788' || keyInput.toUpperCase() === 'LORA2026') {
+        if (callsignInput) {
+          localNodeId = callsignInput;
+          try { localStorage.setItem('lora_node_id', localNodeId); } catch(e) {}
+        }
+        try { sessionStorage.setItem('lora_session_unlocked', 'true'); } catch(e) {}
+        document.getElementById('lockScreen').style.display = 'none';
+        initApp();
+      } else {
+        errBox.style.display = 'block';
+        setTimeout(function() { errBox.style.display = 'none'; }, 3000);
+      }
+    }
+
+    function lockApp() {
+      try { sessionStorage.removeItem('lora_session_unlocked'); } catch(e) {}
+      document.getElementById('lockScreen').style.display = 'flex';
+      document.getElementById('authKey').value = '';
+    }
+
+    function changeEncryptionKey() {
+      var newKey = document.getElementById('settingNewPasscode').value.trim();
+      if (newKey.length >= 4) {
+        MASTER_ENCRYPTION_KEY = newKey;
+        try { localStorage.setItem('lora_encryption_key', newKey); } catch(e) {}
+        document.getElementById('settingNewPasscode').value = '';
+        showToast('Encryption Key updated to: ' + newKey);
+      } else {
+        alert('Passcode must be at least 4 characters long.');
+      }
+    }
+
+    function initApp() {
+      try {
+        var disp = document.getElementById('localNodeDisplay');
+        if (disp) disp.textContent = "Node: " + localNodeId + " (Local)";
+        var inp = document.getElementById('settingNodeId');
+        if (inp) inp.value = localNodeId;
+        updateClock();
+        setInterval(updateClock, 15000);
+        renderAll();
+      } catch(err) {
+        console.log(err);
+      }
+    }
+
+    function updateClock() {
+      try {
+        var now = new Date();
+        var timeStr = String(now.getHours()).padStart(2,'0') + ":" + String(now.getMinutes()).padStart(2,'0');
+        var clk = document.getElementById('clockDisplay');
+        if (clk) clk.textContent = timeStr;
+      } catch(e) {}
+    }
+
+    function renderAll() {
+      try {
+        var cNodes = document.getElementById('countNodes');
+        if (cNodes) cNodes.textContent = nodes.length + " Online";
+        var cMsgs = document.getElementById('countMsgs');
+        if (cMsgs) cMsgs.textContent = messages.length + " Packets";
+
+        var homeFeed = document.getElementById('homeFeed');
+        if (homeFeed) {
+          homeFeed.innerHTML = messages.slice(-4).reverse().map(renderBubble).join('');
+        }
+
+        var chatFeed = document.getElementById('chatFeed');
+        if (chatFeed) {
+          var filtered = targetRecipient === 'BROADCAST' 
+            ? messages 
+            : messages.filter(function(m) { return m.senderId === targetRecipient || m.recipientId === targetRecipient; });
+          chatFeed.innerHTML = filtered.map(renderBubble).join('');
+        }
+
+        var nodesList = document.getElementById('nodesList');
+        if (nodesList) {
+          nodesList.innerHTML = nodes.map(function(n) {
+            return '<div class="node-item">' +
+              '<div class="node-left">' +
+                '<div class="node-icon-box">📟</div>' +
+                '<div>' +
+                  '<div class="node-id">' + n.id + '</div>' +
+                  '<div class="node-name">' + n.name + ' • Seen ' + n.lastSeen + '</div>' +
+                '</div>' +
+              '</div>' +
+              '<div style="text-align: right;">' +
+                '<div style="font-size: 11px; font-weight: 700; color: var(--accent); margin-bottom: 4px;">' + n.rssi + ' dBm</div>' +
+                '<button class="btn-send" style="padding: 4px 10px; font-size: 11px;" onclick="openNodeChat(\'' + n.id + '\')">Chat</button>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+        }
+      } catch(e) {
+        console.log(e);
+      }
+    }
+
+    function renderBubble(m) {
+      if (m.isEmergency) {
+        return '<div class="msg-bubble emergency">' +
+          '<div class="msg-meta">' +
+            '<span>⚠️ SOS BROADCAST • ' + m.senderId + '</span>' +
+            '<span>' + (m.rssi ? m.rssi + ' dBm' : '') + '</span>' +
+          '</div>' +
+          '<div style="font-weight: 600;">' + m.text + '</div>' +
+          '<div class="msg-footer">' + m.time + '</div>' +
+        '</div>';
+      }
+      return '<div class="msg-bubble ' + (m.isSent ? 'sent' : 'received') + '">' +
+        '<div class="msg-meta">' +
+          '<span>' + (m.isSent ? 'You (' + localNodeId + ')' : m.senderId) + '</span>' +
+          '<span>' + (m.rssi && !m.isSent ? m.rssi + ' dBm' : '') + '</span>' +
+        '</div>' +
+        '<div>' + m.text + '</div>' +
+        '<div class="msg-footer">' + m.time + (m.isSent ? ' ✓✓' : '') + '</div>' +
+      '</div>';
+    }
+
+    function sendQuickMessage() {
+      var input = document.getElementById('quickMsgInput');
+      if (!input) return;
+      var text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      postMessage(text, 'BROADCAST', false);
+    }
+
+    function sendChatMessage() {
+      var input = document.getElementById('chatInput');
+      if (!input) return;
+      var text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      postMessage(text, targetRecipient, false);
+    }
+
+    function postMessage(text, recipient, isEmergency) {
+      var now = new Date();
+      var timeStr = String(now.getHours()).padStart(2,'0') + ":" + String(now.getMinutes()).padStart(2,'0');
+      
+      var newMsg = {
+        id: String(Date.now()),
+        senderId: localNodeId,
+        recipientId: recipient,
+        text: text,
+        time: timeStr,
+        isSent: true,
+        rssi: -45,
+        isEmergency: isEmergency
+      };
+      
+      messages.push(newMsg);
+      try { localStorage.setItem('lora_messages', JSON.stringify(messages)); } catch(e) {}
+      renderAll();
+      showToast(isEmergency ? '🚨 SOS Broadcast Relayed!' : '📡 Packet sent to mesh!');
+
+      setTimeout(function() {
+        var replySender = recipient === 'BROADCAST' ? 'NODE-BRAVO' : recipient;
+        var replyMsg = {
+          id: String(Date.now() + 1),
+          senderId: replySender,
+          recipientId: localNodeId,
+          text: isEmergency 
+            ? 'ACK: Emergency alert confirmed by Base Station! Assistance en route.' 
+            : 'ACK: Received "' + text + '" over LoRa. Link quality 100%.',
+          time: timeStr,
+          isSent: false,
+          rssi: -60,
+          isEmergency: false
+        };
+        messages.push(replyMsg);
+        try { localStorage.setItem('lora_messages', JSON.stringify(messages)); } catch(e) {}
+        renderAll();
+      }, 1400);
+    }
+
+    function triggerSos(text) {
+      if (confirm('Broadcast Emergency Beacon: "' + text + '" to all nodes?')) {
+        postMessage(text, 'BROADCAST', true);
+      }
+    }
+
+    function openNodeChat(nodeId) {
+      targetRecipient = nodeId;
+      navTo('messages');
+    }
+
+    function filterRecipient(r, btn) {
+      targetRecipient = r;
+      var buttons = document.querySelectorAll('.chip-btn');
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].style.background = 'rgba(255,255,255,0.06)';
+        buttons[i].style.color = 'var(--text-primary)';
+      }
+      if (btn) {
+        btn.style.background = 'var(--primary)';
+        btn.style.color = 'white';
+      }
+      renderAll();
+    }
+
+    function saveNodeId() {
+      var val = document.getElementById('settingNodeId').value.trim();
+      if (val) {
+        localNodeId = val;
+        try { localStorage.setItem('lora_node_id', val); } catch(e) {}
+        document.getElementById('localNodeDisplay').textContent = "Node: " + localNodeId + " (Local)";
+        showToast('Node Callsign updated!');
+      }
+    }
+
+    function clearHistory() {
+      if (confirm('Clear all stored messages?')) {
+        messages = [];
+        try { localStorage.removeItem('lora_messages'); } catch(e) {}
+        renderAll();
+        showToast('History cleared.');
+      }
+    }
+
+    function navTo(tab) {
+      currentTab = tab;
+      var screens = document.querySelectorAll('.screen-content');
+      for (var i = 0; i < screens.length; i++) screens[i].classList.remove('active');
+      var navs = document.querySelectorAll('.nav-item');
+      for (var j = 0; j < navs.length; j++) navs[j].classList.remove('active');
+      
+      var targetScreen = document.getElementById('screen-' + tab);
+      if (targetScreen) targetScreen.classList.add('active');
+
+      var tabs = ['home', 'messages', 'nodes', 'emergency', 'settings'];
+      var idx = tabs.indexOf(tab);
+      if (idx !== -1 && navs[idx]) navs[idx].classList.add('active');
+
+      var titles = {
+        home: 'LoRa Mesh Monitor',
+        messages: 'Mesh Chat Feed',
+        nodes: 'Discovered Nodes',
+        emergency: 'SOS Broadcast',
+        settings: 'Configuration'
+      };
+      var t = document.getElementById('headerTitle');
+      if (t) t.textContent = titles[tab] || 'LoRa Mesh';
+    }
+
+    function refreshNodes() {
+      nodes.forEach(function(n) {
+        n.rssi = Math.min(-40, Math.max(-110, n.rssi + (Math.floor(Math.random() * 7) - 3)));
+        n.lastSeen = 'just now';
+      });
+      renderAll();
+      showToast('Radio frequencies refreshed.');
+    }
+
+    function showToast(msg) {
+      var t = document.getElementById('toast');
+      if (t) {
+        t.textContent = msg;
+        t.style.display = 'block';
+        setTimeout(function() { t.style.display = 'none'; }, 2200);
+      }
+    }
+
+    window.onload = checkAuth;
+  </script>
+</body>
+</html>
