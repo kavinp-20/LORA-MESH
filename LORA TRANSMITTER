@@ -1,0 +1,585 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <LoRa_E220.h>
+
+// =====================================================
+// CHANGE ONLY THIS LINE
+// ESP32-1 = ESP32-PERSON1
+// ESP32-2 = ESP32-PERSON2
+// =====================================================
+
+#define DEVICE_NAME "ESP32-PERSON1"
+
+// =====================================================
+// E220
+// =====================================================
+
+#define LORA_RX 16
+#define LORA_TX 17
+
+#define E220_M0  25
+#define E220_M1  26
+#define E220_AUX 27
+
+HardwareSerial LoRaSerial(2);
+
+LoRa_E220 e220(
+  &LoRaSerial,
+  E220_AUX,
+  E220_M0,
+  E220_M1
+);
+
+// =====================================================
+// BLE UUID - SAME AS YOUR APP
+// =====================================================
+
+#define SERVICE_UUID \
+"6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+
+#define RX_UUID \
+"6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+
+#define TX_UUID \
+"6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+// =====================================================
+// PACKET SETTINGS
+// =====================================================
+
+// E220 maximum = 200 bytes
+// We use 180 bytes for safety.
+
+#define LORA_PACKET_SIZE 180
+
+// Maximum complete message we will reconstruct
+#define MAX_MESSAGE_SIZE 4096
+
+// =====================================================
+// BLE
+// =====================================================
+
+BLECharacteristic *txCharacteristic = nullptr;
+
+bool phoneConnected = false;
+
+// =====================================================
+// MESSAGE REASSEMBLY
+// =====================================================
+
+String receiveBuffer = "";
+
+int expectedPackets = 0;
+int receivedPackets = 0;
+
+String currentMessageID = "";
+
+bool receivingLongMessage = false;
+
+// =====================================================
+// SEND LONG MESSAGE THROUGH E220
+// =====================================================
+
+void sendLongMessage(String message) {
+
+  int messageLength = message.length();
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("LORA TRANSMISSION");
+  Serial.print("TOTAL BYTES: ");
+  Serial.println(messageLength);
+
+  // ---------------------------------------------------
+  // Short message
+  // ---------------------------------------------------
+
+  if (messageLength <= 170) {
+
+    ResponseStatus result =
+      e220.sendMessage(message);
+
+    if (result.code == 1) {
+
+      Serial.println("SINGLE PACKET SENT");
+
+    } else {
+
+      Serial.print("LORA ERROR: ");
+      Serial.println(
+        result.getResponseDescription()
+      );
+    }
+
+    return;
+  }
+
+  // ---------------------------------------------------
+  // Long message
+  // ---------------------------------------------------
+
+  int totalPackets =
+    (messageLength + LORA_PACKET_SIZE - 1)
+    / LORA_PACKET_SIZE;
+
+  // Unique message ID
+  static unsigned long messageID = 0;
+  messageID++;
+
+  Serial.print("TOTAL PACKETS: ");
+  Serial.println(totalPackets);
+
+  // ---------------------------------------------------
+  // Send every packet
+  // ---------------------------------------------------
+
+  for (int packetNumber = 0;
+       packetNumber < totalPackets;
+       packetNumber++) {
+
+    int start =
+      packetNumber * LORA_PACKET_SIZE;
+
+    int remaining =
+      messageLength - start;
+
+    int chunkSize =
+      min(LORA_PACKET_SIZE, remaining);
+
+    String chunk =
+      message.substring(
+        start,
+        start + chunkSize
+      );
+
+    // Header
+    //
+    // ~L|messageID|packet|total|data
+    //
+
+    String packet =
+      "~L|" +
+      String(messageID) +
+      "|" +
+      String(packetNumber + 1) +
+      "|" +
+      String(totalPackets) +
+      "|" +
+      chunk;
+
+    Serial.print("Sending packet ");
+    Serial.print(packetNumber + 1);
+    Serial.print("/");
+    Serial.println(totalPackets);
+
+    ResponseStatus result =
+      e220.sendMessage(packet);
+
+    if (result.code != 1) {
+
+      Serial.print("PACKET ERROR: ");
+      Serial.println(
+        result.getResponseDescription()
+      );
+
+      return;
+    }
+
+    // Give the radio time between packets
+    delay(50);
+  }
+
+  Serial.println("ALL PACKETS SENT");
+  Serial.println("================================");
+}
+
+// =====================================================
+// PROCESS RECEIVED LORA PACKET
+// =====================================================
+
+void processLoRaPacket(String packet) {
+
+  packet.trim();
+
+  if (packet.length() == 0) {
+    return;
+  }
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("LORA PACKET RECEIVED");
+  Serial.println(packet);
+
+  // ---------------------------------------------------
+  // NORMAL SHORT MESSAGE
+  // ---------------------------------------------------
+
+  if (!packet.startsWith("~L|")) {
+
+    Serial.println("NORMAL MESSAGE");
+
+    sendToPhone(packet);
+
+    return;
+  }
+
+  // ---------------------------------------------------
+  // LONG MESSAGE PACKET
+  // ---------------------------------------------------
+
+  int p1 = packet.indexOf('|', 3);
+
+  if (p1 == -1) {
+    return;
+  }
+
+  int p2 = packet.indexOf('|', p1 + 1);
+
+  if (p2 == -1) {
+    return;
+  }
+
+  int p3 = packet.indexOf('|', p2 + 1);
+
+  if (p3 == -1) {
+    return;
+  }
+
+  // Extract header
+  String messageID =
+    packet.substring(3, p1);
+
+  int packetNumber =
+    packet.substring(p1 + 1, p2).toInt();
+
+  int totalPackets =
+    packet.substring(p2 + 1, p3).toInt();
+
+  String data =
+    packet.substring(p3 + 1);
+
+  // ---------------------------------------------------
+  // NEW MESSAGE
+  // ---------------------------------------------------
+
+  if (messageID != currentMessageID) {
+
+    currentMessageID = messageID;
+
+    receiveBuffer = "";
+
+    expectedPackets = totalPackets;
+
+    receivedPackets = 0;
+
+    receivingLongMessage = true;
+
+    Serial.println("NEW LONG MESSAGE");
+    Serial.print("TOTAL PACKETS: ");
+    Serial.println(totalPackets);
+  }
+
+  // ---------------------------------------------------
+  // ADD DATA
+  // ---------------------------------------------------
+
+  receiveBuffer += data;
+
+  receivedPackets++;
+
+  Serial.print("PACKET ");
+  Serial.print(packetNumber);
+  Serial.print("/");
+  Serial.println(totalPackets);
+
+  // ---------------------------------------------------
+  // COMPLETE MESSAGE
+  // ---------------------------------------------------
+
+  if (receivedPackets >= expectedPackets) {
+
+    Serial.println();
+    Serial.println("********************************");
+    Serial.println("COMPLETE MESSAGE RECEIVED");
+    Serial.print("TOTAL BYTES: ");
+    Serial.println(receiveBuffer.length());
+    Serial.println("********************************");
+
+    // Send complete original JSON
+    // to the phone
+
+    sendToPhone(receiveBuffer);
+
+    // Reset
+    receiveBuffer = "";
+
+    expectedPackets = 0;
+
+    receivedPackets = 0;
+
+    currentMessageID = "";
+
+    receivingLongMessage = false;
+  }
+}
+
+// =====================================================
+// SEND COMPLETE MESSAGE TO PHONE
+// =====================================================
+
+void sendToPhone(String message) {
+
+  if (!phoneConnected) {
+
+    Serial.println(
+      "PHONE NOT CONNECTED"
+    );
+
+    return;
+  }
+
+  txCharacteristic->setValue(
+    message.c_str()
+  );
+
+  txCharacteristic->notify();
+
+  Serial.println(
+    "COMPLETE MESSAGE -> PHONE"
+  );
+}
+
+// =====================================================
+// BLE SERVER CALLBACK
+// =====================================================
+
+class MyServerCallbacks :
+  public BLEServerCallbacks {
+
+  void onConnect(
+    BLEServer *server
+  ) override {
+
+    phoneConnected = true;
+
+    Serial.println();
+    Serial.println(
+      "PHONE CONNECTED"
+    );
+  }
+
+  void onDisconnect(
+    BLEServer *server
+  ) override {
+
+    phoneConnected = false;
+
+    Serial.println();
+    Serial.println(
+      "PHONE DISCONNECTED"
+    );
+
+    delay(300);
+
+    server->startAdvertising();
+  }
+};
+
+// =====================================================
+// PHONE -> ESP32
+// =====================================================
+
+class PhoneReceiveCallback :
+  public BLECharacteristicCallbacks {
+
+  void onWrite(
+    BLECharacteristic *characteristic
+  ) override {
+
+    String message =
+      characteristic->getValue();
+
+    if (message.length() == 0) {
+      return;
+    }
+
+    message.trim();
+
+    Serial.println();
+    Serial.println("================================");
+    Serial.println("PHONE -> ESP32");
+    Serial.print("BYTES: ");
+    Serial.println(message.length());
+    Serial.println("================================");
+
+    // -------------------------------------------------
+    // SEND COMPLETE MESSAGE
+    // Automatically fragments if necessary
+    // -------------------------------------------------
+
+    sendLongMessage(message);
+  }
+};
+
+// =====================================================
+// BLE SETUP
+// =====================================================
+
+void setupBLE() {
+
+  BLEDevice::init(
+    DEVICE_NAME
+  );
+
+  BLEServer *server =
+    BLEDevice::createServer();
+
+  server->setCallbacks(
+    new MyServerCallbacks()
+  );
+
+  BLEService *service =
+    server->createService(
+      SERVICE_UUID
+    );
+
+  // ---------------------------------------------------
+  // PHONE -> ESP32
+  // ---------------------------------------------------
+
+  BLECharacteristic *rxCharacteristic =
+    service->createCharacteristic(
+      RX_UUID,
+      BLECharacteristic::PROPERTY_WRITE |
+      BLECharacteristic::PROPERTY_WRITE_NR
+    );
+
+  rxCharacteristic->setCallbacks(
+    new PhoneReceiveCallback()
+  );
+
+  // ---------------------------------------------------
+  // ESP32 -> PHONE
+  // ---------------------------------------------------
+
+  txCharacteristic =
+    service->createCharacteristic(
+      TX_UUID,
+      BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+  txCharacteristic->addDescriptor(
+    new BLE2902()
+  );
+
+  service->start();
+
+  BLEAdvertising *advertising =
+    BLEDevice::getAdvertising();
+
+  advertising->addServiceUUID(
+    SERVICE_UUID
+  );
+
+  advertising->setScanResponse(true);
+
+  advertising->start();
+
+  Serial.println();
+  Serial.println("BLE READY");
+  Serial.print("DEVICE NAME: ");
+  Serial.println(DEVICE_NAME);
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  delay(1000);
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println(DEVICE_NAME);
+  Serial.println("LONG MESSAGE LORA NODE");
+  Serial.println("================================");
+
+  // ---------------------------------------------------
+  // E220 UART
+  // ---------------------------------------------------
+
+  LoRaSerial.begin(
+    9600,
+    SERIAL_8N1,
+    LORA_RX,
+    LORA_TX
+  );
+
+  delay(300);
+
+  // ---------------------------------------------------
+  // E220 START
+  // ---------------------------------------------------
+
+  bool started =
+    e220.begin();
+
+  if (started) {
+
+    Serial.println(
+      "E220 INITIALIZED"
+    );
+
+  } else {
+
+    Serial.println(
+      "E220 INITIALIZATION FAILED"
+    );
+  }
+
+  delay(500);
+
+  // ---------------------------------------------------
+  // BLE
+  // ---------------------------------------------------
+
+  setupBLE();
+
+  Serial.println();
+  Serial.println(
+    "SYSTEM READY"
+  );
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+
+  // ---------------------------------------------------
+  // E220 -> ESP32
+  // ---------------------------------------------------
+
+  if (e220.available() > 1) {
+
+    ResponseContainer response =
+      e220.receiveMessage();
+
+    if (response.status.code == 1) {
+
+      String packet =
+        response.data;
+
+      processLoRaPacket(packet);
+    }
+  }
+
+  delay(10);
+}
