@@ -1,0 +1,619 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <LoRa_E220.h>
+
+// =====================================================
+// ESP32-2 : RECEIVER
+// =====================================================
+
+#define DEVICE_NAME "ESP32-PERSON2"
+
+// =====================================================
+// E220 CONNECTION
+// =====================================================
+
+#define LORA_RX 16
+#define LORA_TX 17
+
+#define E220_M0  25
+#define E220_M1  26
+#define E220_AUX 27
+
+HardwareSerial LoRaSerial(2);
+
+LoRa_E220 e220(
+  &LoRaSerial,
+  E220_AUX,
+  E220_M0,
+  E220_M1
+);
+
+// =====================================================
+// BLE UUID - MUST MATCH YOUR APP
+// =====================================================
+
+#define SERVICE_UUID \
+"6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+
+#define RX_UUID \
+"6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+
+#define TX_UUID \
+"6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+// =====================================================
+// LONG MESSAGE SETTINGS
+// =====================================================
+
+#define MAX_MESSAGE_SIZE 4096
+
+// =====================================================
+// BLE
+// =====================================================
+
+BLECharacteristic *txCharacteristic = nullptr;
+
+bool phoneConnected = false;
+
+// =====================================================
+// REASSEMBLY VARIABLES
+// =====================================================
+
+String receivedMessage = "";
+
+String currentMessageID = "";
+
+int totalPackets = 0;
+int receivedPackets = 0;
+
+// =====================================================
+// SEND COMPLETE MESSAGE TO PHONE 2
+// =====================================================
+
+void sendToPhone(String message)
+{
+  if (!phoneConnected)
+  {
+    Serial.println("PHONE 2 NOT CONNECTED");
+    return;
+  }
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("SENDING COMPLETE MESSAGE");
+  Serial.print("MESSAGE SIZE: ");
+  Serial.print(message.length());
+  Serial.println(" BYTES");
+  Serial.println("================================");
+
+  /*
+     IMPORTANT:
+     The complete JSON is sent to the BLE
+     characteristic.
+
+     Your app receives it as one logical message.
+  */
+
+  txCharacteristic->setValue(message.c_str());
+  txCharacteristic->notify();
+
+  Serial.println("ESP32-2 -> PHONE 2");
+}
+
+// =====================================================
+// PROCESS NORMAL MESSAGE
+// =====================================================
+
+void processNormalMessage(String packet)
+{
+  packet.trim();
+
+  if (packet.length() == 0)
+    return;
+
+  Serial.println();
+  Serial.println("--------------------------------");
+  Serial.println("NORMAL LORA MESSAGE");
+  Serial.println(packet);
+  Serial.println("--------------------------------");
+
+  sendToPhone(packet);
+}
+
+// =====================================================
+// PROCESS LONG MESSAGE PACKET
+// =====================================================
+//
+// Format:
+//
+// ~L|MESSAGE_ID|PACKET_NUMBER|TOTAL_PACKETS|DATA
+//
+// Example:
+//
+// ~L|25|1|4|{"senderId":"NODE...
+//
+// =====================================================
+
+void processLongPacket(String packet)
+{
+  // Find separators
+
+  int p1 = packet.indexOf('|', 3);
+
+  if (p1 == -1)
+  {
+    Serial.println("INVALID PACKET");
+    return;
+  }
+
+  int p2 = packet.indexOf('|', p1 + 1);
+
+  if (p2 == -1)
+  {
+    Serial.println("INVALID PACKET");
+    return;
+  }
+
+  int p3 = packet.indexOf('|', p2 + 1);
+
+  if (p3 == -1)
+  {
+    Serial.println("INVALID PACKET");
+    return;
+  }
+
+  // ---------------------------------------------------
+  // Extract information
+  // ---------------------------------------------------
+
+  String messageID =
+    packet.substring(3, p1);
+
+  int packetNumber =
+    packet.substring(
+      p1 + 1,
+      p2
+    ).toInt();
+
+  int packetTotal =
+    packet.substring(
+      p2 + 1,
+      p3
+    ).toInt();
+
+  String data =
+    packet.substring(p3 + 1);
+
+  // ---------------------------------------------------
+  // Check message size
+  // ---------------------------------------------------
+
+  if (
+    receivedMessage.length() +
+    data.length() >
+    MAX_MESSAGE_SIZE
+  )
+  {
+    Serial.println();
+    Serial.println("MESSAGE TOO LARGE");
+
+    receivedMessage = "";
+    currentMessageID = "";
+    totalPackets = 0;
+    receivedPackets = 0;
+
+    return;
+  }
+
+  // ---------------------------------------------------
+  // New message
+  // ---------------------------------------------------
+
+  if (messageID != currentMessageID)
+  {
+    Serial.println();
+    Serial.println("================================");
+    Serial.println("NEW LONG MESSAGE");
+    Serial.println("================================");
+
+    currentMessageID = messageID;
+
+    receivedMessage = "";
+
+    totalPackets = packetTotal;
+
+    receivedPackets = 0;
+  }
+
+  // ---------------------------------------------------
+  // Check packet number
+  // ---------------------------------------------------
+
+  if (packetNumber != receivedPackets + 1)
+  {
+    Serial.println();
+    Serial.println("WARNING: PACKET ORDER ERROR");
+
+    Serial.print("EXPECTED: ");
+    Serial.println(receivedPackets + 1);
+
+    Serial.print("RECEIVED: ");
+    Serial.println(packetNumber);
+
+    /*
+       We don't append an out-of-order packet because
+       that would corrupt the JSON.
+    */
+
+    return;
+  }
+
+  // ---------------------------------------------------
+  // Add packet data
+  // ---------------------------------------------------
+
+  receivedMessage += data;
+
+  receivedPackets++;
+
+  Serial.print("PACKET ");
+  Serial.print(packetNumber);
+  Serial.print(" / ");
+  Serial.println(totalPackets);
+
+  Serial.print("CURRENT SIZE: ");
+  Serial.println(receivedMessage.length());
+
+  // ---------------------------------------------------
+  // Complete?
+  // ---------------------------------------------------
+
+  if (receivedPackets == totalPackets)
+  {
+    Serial.println();
+    Serial.println("********************************");
+    Serial.println("COMPLETE LONG MESSAGE RECEIVED");
+    Serial.println("********************************");
+
+    Serial.print("TOTAL BYTES: ");
+    Serial.println(receivedMessage.length());
+
+    Serial.println();
+    Serial.println("COMPLETE JSON:");
+    Serial.println(receivedMessage);
+
+    // -------------------------------------------------
+    // Send complete JSON to Phone 2
+    // -------------------------------------------------
+
+    sendToPhone(receivedMessage);
+
+    // -------------------------------------------------
+    // Reset
+    // -------------------------------------------------
+
+    receivedMessage = "";
+
+    currentMessageID = "";
+
+    totalPackets = 0;
+
+    receivedPackets = 0;
+
+    Serial.println();
+    Serial.println("RECEIVER READY FOR NEXT MESSAGE");
+  }
+}
+
+// =====================================================
+// PROCESS LORA DATA
+// =====================================================
+
+void processLoRaData(String packet)
+{
+  packet.trim();
+
+  if (packet.length() == 0)
+    return;
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("E220 DATA RECEIVED");
+  Serial.println("================================");
+
+  Serial.print("BYTES: ");
+  Serial.println(packet.length());
+
+  // ---------------------------------------------------
+  // Check whether this is fragmented
+  // ---------------------------------------------------
+
+  if (packet.startsWith("~L|"))
+  {
+    processLongPacket(packet);
+  }
+  else
+  {
+    processNormalMessage(packet);
+  }
+}
+
+// =====================================================
+// BLE SERVER CALLBACKS
+// =====================================================
+
+class MyServerCallbacks :
+  public BLEServerCallbacks
+{
+  void onConnect(BLEServer *server)
+  {
+    phoneConnected = true;
+
+    Serial.println();
+    Serial.println("==============================");
+    Serial.println("PHONE 2 CONNECTED");
+    Serial.println("==============================");
+  }
+
+  void onDisconnect(BLEServer *server)
+  {
+    phoneConnected = false;
+
+    Serial.println();
+    Serial.println("PHONE 2 DISCONNECTED");
+
+    delay(300);
+
+    server->startAdvertising();
+
+    Serial.println("BLE ADVERTISING RESTARTED");
+  }
+};
+
+// =====================================================
+// PHONE 2 -> ESP32-2
+// =====================================================
+//
+// This is also included so communication can be
+// two-way.
+//
+// Phone 2 -> ESP32-2 -> E220 -> ESP32-1
+//
+// =====================================================
+
+class PhoneReceiveCallback :
+  public BLECharacteristicCallbacks
+{
+  void onWrite(
+    BLECharacteristic *characteristic
+  )
+  {
+    String message =
+      characteristic->getValue();
+
+    if (message.length() == 0)
+      return;
+
+    message.trim();
+
+    Serial.println();
+    Serial.println("================================");
+    Serial.println("PHONE 2 -> ESP32-2");
+    Serial.println("================================");
+
+    Serial.print("MESSAGE SIZE: ");
+    Serial.println(message.length());
+
+    Serial.println(message);
+
+    /*
+       NOTE:
+
+       ESP32-2 transmitter-side fragmentation
+       should be used here if Phone 2 sends
+       a paragraph.
+
+       For now, short messages are transmitted
+       directly.
+    */
+
+    if (message.length() <= 190)
+    {
+      ResponseStatus result =
+        e220.sendMessage(message);
+
+      if (result.code == 1)
+      {
+        Serial.println("ESP32-2 -> E220 SUCCESS");
+      }
+      else
+      {
+        Serial.print("E220 ERROR: ");
+        Serial.println(
+          result.getResponseDescription()
+        );
+      }
+    }
+    else
+    {
+      Serial.println(
+        "MESSAGE TOO LONG FOR SINGLE E220 PACKET"
+      );
+
+      Serial.println(
+        "USE FRAGMENTED TRANSMISSION"
+      );
+    }
+  }
+};
+
+// =====================================================
+// BLE SETUP
+// =====================================================
+
+void setupBLE()
+{
+  BLEDevice::init(DEVICE_NAME);
+
+  BLEServer *server =
+    BLEDevice::createServer();
+
+  server->setCallbacks(
+    new MyServerCallbacks()
+  );
+
+  BLEService *service =
+    server->createService(
+      SERVICE_UUID
+    );
+
+  // ---------------------------------------------------
+  // PHONE -> ESP32
+  // ---------------------------------------------------
+
+  BLECharacteristic *rxCharacteristic =
+    service->createCharacteristic(
+      RX_UUID,
+      BLECharacteristic::PROPERTY_WRITE |
+      BLECharacteristic::PROPERTY_WRITE_NR
+    );
+
+  rxCharacteristic->setCallbacks(
+    new PhoneReceiveCallback()
+  );
+
+  // ---------------------------------------------------
+  // ESP32 -> PHONE
+  // ---------------------------------------------------
+
+  txCharacteristic =
+    service->createCharacteristic(
+      TX_UUID,
+      BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+  txCharacteristic->addDescriptor(
+    new BLE2902()
+  );
+
+  // Start BLE service
+
+  service->start();
+
+  // Start advertising
+
+  BLEAdvertising *advertising =
+    BLEDevice::getAdvertising();
+
+  advertising->addServiceUUID(
+    SERVICE_UUID
+  );
+
+  advertising->setScanResponse(true);
+
+  advertising->start();
+
+  Serial.println();
+  Serial.println("BLE READY");
+
+  Serial.print("DEVICE NAME: ");
+  Serial.println(DEVICE_NAME);
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup()
+{
+  Serial.begin(115200);
+
+  delay(1000);
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("ESP32-PERSON2");
+  Serial.println("LORA RECEIVER");
+  Serial.println("LONG MESSAGE SUPPORT");
+  Serial.println("================================");
+
+  // ---------------------------------------------------
+  // E220 UART
+  // ---------------------------------------------------
+
+  LoRaSerial.begin(
+    9600,
+    SERIAL_8N1,
+    LORA_RX,
+    LORA_TX
+  );
+
+  Serial.println("E220 UART STARTED");
+
+  delay(300);
+
+  // ---------------------------------------------------
+  // E220 BEGIN
+  // Your installed Alteriom library returns BOOL.
+  // ---------------------------------------------------
+
+  bool started =
+    e220.begin();
+
+  if (started)
+  {
+    Serial.println(
+      "E220 INITIALIZED SUCCESSFULLY"
+    );
+  }
+  else
+  {
+    Serial.println(
+      "E220 INITIALIZATION FAILED"
+    );
+  }
+
+  delay(500);
+
+  // ---------------------------------------------------
+  // BLE
+  // ---------------------------------------------------
+
+  setupBLE();
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("ESP32-2 READY");
+  Serial.println("WAITING FOR LORA DATA...");
+  Serial.println("================================");
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop()
+{
+  // ---------------------------------------------------
+  // Check E220
+  // ---------------------------------------------------
+
+  if (e220.available() > 1)
+  {
+    ResponseContainer response =
+      e220.receiveMessage();
+
+    if (response.status.code == 1)
+    {
+      String packet =
+        response.data;
+
+      processLoRaData(packet);
+    }
+  }
+
+  delay(10);
+}
